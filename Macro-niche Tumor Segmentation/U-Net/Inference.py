@@ -1,5 +1,5 @@
 #loaded in pre-trained .pt file weights; from https://github.com/dalifreire/tumor_regions_segmentation
-#model name: ORCA__Size-640x640_Epoch-100_Images-4181_Batch-1__color_augmentation
+# model name: ORCA__Size-640x640_Epoch-100_Images-4181_Batch-1__color_augmentation
 
 import torch
 
