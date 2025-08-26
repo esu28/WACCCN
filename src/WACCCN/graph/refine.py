@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
+#refine graph with ccc inference scores
 import os, json
 import numpy as np
 import pandas as pd
