@@ -1,4 +1,4 @@
-# post-hoc denoising step 
+# post-hoc denoising step (optional)
 import os, numpy as np, pandas as pd
 from scipy.spatial import cKDTree
 from collections import Counter, defaultdict
