@@ -1,6 +1,6 @@
 WACCCN
 
-U-Net architecture and WSI methodology were adopted from:
+U-Net architecture, trained weights, and WSI methodology were adopted from:
 
 1 Dalí F. D. dos Santos, Paulo R. de Faria, Bruno A. N. Travençolo, Marcelo Z. do Nascimento, Automated detection of tumor regions from oral histological whole slide images using fully convolutional neural networks, Biomedical Signal Processing and Control, Volume 69, 2021, 102921, ISSN 1746-8094, https://doi.org/10.1016/j.bspc.2021.102921.
 
