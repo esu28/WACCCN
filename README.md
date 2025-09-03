@@ -1,4 +1,4 @@
-#WACCCN
+# WACCCN
 
 U-Net architecture, trained weights, and WSI methodology were adopted from:
 
