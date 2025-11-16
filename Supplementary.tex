@@ -1,0 +1,520 @@
+\section{Supplementary Methods}
+\label{sec:supp-methods}
+
+\subsection{Wavelet Transforms: Formal Definitions}
+\label{supp:wavelet-math}
+
+This section records the formal matrix expressions underlying the real $M$-band DWT used throughout WACCCN. Let $X\in\mathbb{R}^{n\times n}$ denote a single-channel input (gene field or histology channel). When $n$ is not divisible by $M$, we apply symmetric padding to preserve structural continuity while avoiding artifacts from zero or circular padding. After transforming, we crop padding back to the native support~\cite{Chaux2006}.
+
+A 1D $M$-band transform is encoded by
+\[
+W \;=\;
+\begin{bmatrix}
+W_\alpha \\ W_{\beta^{(1)}} \\ \vdots \\ W_{\beta^{(M-1)}}
+\end{bmatrix}
+\in\mathbb{R}^{M(n/M)\times n},
+\]
+where each $W_f$ corresponds to convolution with filter $f$ followed by downsampling by $M$. In 2D, the level-1 subbands are
+\[
+S^{(1)}_{f,g} = W_f\, X\, W_g^\top ,\quad f,g\in\{\alpha,\beta^{(1)},\dots,\beta^{(M-1)}\},
+\]
+with $S^{(1)}_{\alpha,\alpha}$ the approximation band and the remaining $M^2{-}1$ bands capturing oriented detail. Deeper levels recursively apply the same construction to the LL band:
+\[
+S^{(\ell+1)}_{f,g}=W_f\,S^{(\ell)}_{\alpha,\alpha}\,W_g^\top .
+\]
+For histology, each of the RGB channels is padded to dimensions divisible by $M^R$, transformed for $R$ levels, and cropped back to the Visium field of view.
+
+\subsection{Marker Detection}
+\label{supp:markers}
+
+Marker genes for visualization and embeddings are identified using a Wilcoxon rank-sum test with Benjamini--Hochberg correction. For groups $A,B$ and expression values $x_{ig}$,
+\[
+\bar{x}_{A,g}=\tfrac{1}{n_A}\sum_{i\in A}x_{ig},\qquad
+\bar{x}_{B,g}=\tfrac{1}{n_B}\sum_{i\in B}x_{ig},
+\]
+\[
+\mathrm{log2FC}_g = \log_2\!\left(\frac{\bar{x}_{A,g}+\varepsilon}{\bar{x}_{B,g}+\varepsilon}\right).
+\]
+Genes with FDR $<0.05$ and $\log_2\mathrm{FC}>1$ are retained.
+
+\subsection{Mask-aware Neighborhood Averages}
+\label{supp:mask-average}
+
+For fields defined on the histology grid we compute masked, weighted means. Let $M$ be the binary tissue mask and $\Omega_q=\{p:\|p-q\|_2\le r\}$. Gaussian weights
+\[
+w_{q,p}=\exp\!\left(-\tfrac{\|p-q\|_2^2}{2\sigma_w^2}\right)
+\]
+are applied only to valid tissue pixels $M_p{=}1$. The masked mean is
+\[
+\langle X\rangle_q =
+\frac{\sum_{p\in\Omega_q} w_{q,p}X_pM_p}{\sum_{p\in\Omega_q} w_{q,p}M_p+\varepsilon}.
+\]
+If the effective denominator is below $\varepsilon$, we return NaN.
+
+\subsection{Anisotropy Variants}
+\label{supp:aniso-variants}
+
+We implement anisotropy using three complementary transform families: 2-band DWT, 4-band DWT, and DTCWT. Each produces subband-specific orientation metadata $(\theta_b,\kappa_b)$ used during corridor pooling.
+
+\paragraph{2-band DWT.}
+Level-1 and level-2 LH, HL, and HH maps are normalized and averaged across RGB channels. Corridor pooling aggregates these power maps to yield horizontal, vertical, and diagonal energies $(E_h,E_v,E_d)$. A reliability score
+\[
+r_{\mathrm{axis}}=\frac{|S_x-S_y|}{S_x+S_y+\varepsilon}
+\]
+with $S_x=E_v+\eta E_d$ and $S_y=E_h+\eta E_d$ provides an anisotropy index mapped to an axis ratio $a\in[1,a_{\max}]$.
+
+\paragraph{4-band DWT.}
+Fifteen oriented subbands provide rich directional information. Corridor-pooled powers $\bar P_b$ and reliability weights $\kappa_b$ define a doubled-angle resultant
+\[
+m=\sum_{b:\,\kappa_b\ge\tau_\kappa} \kappa_b\,\bar P_b\,e^{i2\theta_b},
+\]
+yielding $\theta^\star=\tfrac12\arg(m)$ and normalized anisotropy $r=|m|/(\sum\kappa_b\bar P_b+\varepsilon)$.
+
+\paragraph{Dual-tree Complex Wavelets.}
+Six oriented complex subbands at angles $\{\pm15^\circ,\pm45^\circ,\pm75^\circ\}$ provide orientation-sensitive histology descriptors. Corridor pooling collects magnitudes and phase coherence values. A weighted resultant
+\[
+m=\sum_{\ell,b}\omega^{(\ell)}_b\,\bar P^{(\ell)}_b\,e^{i2\theta_b}
+\]
+gives principal axis $\theta^\star$ and anisotropy strength.
+
+\paragraph{Kernel Construction.}
+All variants map $r$ to an axis ratio
+\[
+a = 1+(a_{\max}-1)r^\gamma,
+\]
+then form an elliptical Gaussian kernel using variances $(\sigma_\parallel^2,\sigma_\perp^2)=(1,1/a)$ with a short-axis floor for stability. Detailed hyperparameters appear in Supplementary Section~\ref{sec:aniso-hparams}.
+
+\subsection{CCC Hyperparameters}
+\label{sec:tuning_ccc}
+
+CCC inference uses winsorized ($p99$) and min--max scaled expression. Secreted ligand dispersion uses a combined anisotropic + radial kernel; membrane-bound interactions use a near-contact radius. Receptor engagement uses a Hill function with $K_{\mathrm{half}}{=}0.01$. Null distributions are generated with $n_{\mathrm{null}}{=}1000$ matched-marginal surrogates. The morphology gate $G_{i\to j}$ is derived from low-level histology features and reused identically across all nulls.
+
+\subsection{Autoencoder Objective}
+\label{supp:autoencoder-details}
+
+Let $Z$ be latent embeddings and $X^{(v)}$ the $v$-th input view. The multi-term objective is:
+
+**Reconstruction.**
+\[
+\mathcal{L}_{\text{rec}}
+=\sum_{v}\frac{1}{F_v}\cdot\frac{1}{N}\sum_i\!\left\lVert X^{(v)}_{i\cdot}-\hat X^{(v)}_{i\cdot}\right\rVert_2^2.
+\]
+
+**CCC-Laplacian Smoothness.**
+Let $W$ be the row-normalized average CCC affinity:
+\[
+\mathcal{L}_{\text{lap}}
+=\tfrac{1}{N}\sum_i\!\left\lVert Z_{i\cdot}-\sum_j W_{ij} Z_{j\cdot}\right\rVert_2^2.
+\]
+
+**Contrastive (InfoNCE).**
+Using cosine similarity and a temperature $\tau=0.12$:
+\[
+\mathcal{L}_{\text{InfoNCE}}
+=\frac{1}{N}\sum_i\frac{1}{|\mathcal{P}(i)|}\sum_{j\in\mathcal{P}(i)}
+\left[-\,\mathrm{sim}_{ij}+\log\!\sum_{\ell\neq i}\exp(\mathrm{sim}_{i\ell})\right].
+\]
+
+**Deep Embedded Clustering.**
+\[
+q_{ik}\propto (1+\|Z_i-c_k\|_2^2)^{-1},\qquad
+p_{ik}=\frac{q_{ik}^2}{\sum_i q_{ik}},
+\]
+\[
+\mathcal{L}_{\text{DEC}}
+=\tfrac{1}{N}\sum_{i,k} p_{ik}\log\frac{p_{ik}}{q_{ik}}.
+\]
+
+**Total Loss.**
+\[
+\mathcal{L}
+=\lambda_{\text{rec}}\mathcal{L}_{\text{rec}}
++\lambda_{\text{lap}}\mathcal{L}_{\text{lap}}
++\lambda_{\text{nce}}\mathcal{L}_{\text{InfoNCE}}
++\lambda_{\text{dec}}\mathcal{L}_{\text{DEC}}.
+\]
+
+\subsection{Anisotropy Metrics}
+\label{supp:metrics-aniso}
+
+All orientations are axial ($\theta\equiv\theta{+}\pi$). The spot scale $h$ is the median 1-NN distance.
+
+**Outgoing Angular Concentration.**
+\[
+R_w(i)=
+\frac{\left|\sum_j w_{ij}\,e^{2i\phi_{ij}}\right|}
+{\sum_j w_{ij}}\in[0,1].
+\]
+
+**Net CCC direction.**
+\[
+\mathbf{v}_i=\sum_j w_{ij}e^{i\phi_{ij}},\quad
+\alpha_i=\arg(\mathbf{v}_i),\quad
+R_{\mathrm{CCC}}(i)=\frac{|\mathbf{v}_i|}{\sum_j w_{ij}}.
+\]
+
+**Global axial alignment.**
+\[
+A=\frac{1}{S}\sum_i \cos\!\left(2(\alpha_i-\theta_i)\right).
+\]
+
+**Along–Across Index.**
+\[
+\mathrm{AI}_i=\cos\!\left(2(\alpha_i-\theta_i)\right).
+\]
+
+**Neighborhood Coherence.**
+\[
+A_{\text{neigh}}(i)=\frac{1}{|\mathcal{N}_r(i)|}\sum_{k\in\mathcal{N}_r(i)}
+\cos\!\left(2(\alpha_k-\theta_k)\right).
+\]
+
+**Orientation Variogram and Coherence Length.**
+\[
+V(\delta)
+=\mathbb{E}\!\left[\cos\!\bigl(2(\theta(x{+}\delta)-\theta(x))\bigr)\right],\quad
+L_c=\inf\{\delta: V(\delta)\le 0.2\}.
+\]
+
+\subsection{Niche Agreement Metrics}
+\label{supp:metrics-niche}
+
+We report ARI, NMI, V-measure, one-to-one accuracy, Purity, macro/weighted F1, and silhouette scores. ARI is:
+\[
+\mathrm{ARI}
+=\frac{\sum_{ij}\binom{n_{ij}}{2}
+-\frac{\sum_i \binom{a_i}{2}\sum_j \binom{b_j}{2}}{\binom{n}{2}}}
+{\tfrac12\!\left[\sum_i\binom{a_i}{2}+\sum_j\binom{b_j}{2}\right]
+-\frac{\sum_i \binom{a_i}{2}\sum_j \binom{b_j}{2}}{\binom{n}{2}}}.
+\]
+
+\section{Supplementary Tables and Filter Banks}
+\label{sec:wavelet_filterbanks}
+
+% (FILTER BANK TABLES INCLUDED UNCHANGED)
+
+
+\section{Supplementary Tables and Filter Banks}
+\label{sec:wavelet_filterbanks}
+
+\renewcommand{\thetable}{S\arabic{table}} % prefix tables with "S"
+\setcounter{table}{0} % reset counter if needed
+
+\subsection{Wavelet Filter Banks}
+
+\paragraph*{Notation and conventions}
+We denote the analysis low-pass filter as $h_0$ and high-pass filters as $h_m$ for $m=1,\dots,M-1$. Rows list taps in increasing sample index order.
+
+\begin{table}[H]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{c c}
+\multicolumn{2}{c}{\textbf{2-band 2-regular (db2) filter bank \cite{Daubechies1992}}} \\
+\toprule
+$h_0$ (low-pass) & $h_1$ (high-pass) \\
+\midrule
+$\phantom{-}0.482963$ & $-0.129410$ \\
+$\phantom{-}0.836516$ & $-0.224144$ \\
+$\phantom{-}0.224144$ & $\phantom{-}0.836516$ \\
+$-0.129410$ & $-0.482963$ \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{2-band 2-regular (db2) filter bank.}
+\label{tab:wv22_bank}
+\end{table}
+\FloatBarrier
+
+\begin{table}[H]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{c c}
+\multicolumn{2}{c}{\textbf{2-band 3-regular (db3) filter bank \cite{Daubechies1992}}} \\
+\toprule
+$h_0$ & $h_1$ \\
+\midrule
+$\phantom{-}0.332671$ & $\phantom{-}0.035226$ \\
+$\phantom{-}0.806892$ & $\phantom{-}0.085441$ \\
+$\phantom{-}0.459878$ & $-0.135011$ \\
+$-0.135011$ & $-0.459878$ \\
+$-0.085441$ & $\phantom{-}0.806892$ \\
+$\phantom{-}0.035226$ & $-0.332671$ \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{2-band 3-regular (db3) filter bank.}
+\label{tab:wv23_bank}
+\end{table}
+\FloatBarrier
+
+\begin{table}[H]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{c c}
+\multicolumn{2}{c}{\textbf{2-band 4-regular (db4) filter bank \cite{Daubechies1992}}} \\
+\toprule
+$h_0$ & $h_1$ \\
+\midrule
+$\phantom{-}0.230378$ & $-0.010597$ \\
+$\phantom{-}0.714847$ & $-0.032883$ \\
+$\phantom{-}0.630881$ & $\phantom{-}0.030841$ \\
+$-0.027984$ & $\phantom{-}0.187035$ \\
+$-0.187035$ & $-0.027984$ \\
+$\phantom{-}0.030841$ & $-0.630881$ \\
+$\phantom{-}0.032883$ & $\phantom{-}0.714847$ \\
+$-0.010597$ & $-0.230378$ \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{2-band 4-regular (db4) filter bank.}
+\label{tab:wv24_bank}
+\end{table}
+\FloatBarrier
+
+\begin{table}[H]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{c c c}
+\multicolumn{3}{c}{\textbf{3-band 2-regular filter bank \cite{LIN2006717}}} \\
+\toprule
+$h_0$ & $h_1$ & $h_2$ \\
+\midrule
+$\phantom{-}0.338386$ & $\phantom{-}0.530836$ & $\phantom{-}0.723286$ \\
+$\phantom{-}0.238964$ & $\phantom{-}0.046514$ & $-0.145936$ \\
+$-0.117377$ & $\phantom{-}0.544331$ & $-0.018706$ \\
+$-0.699120$ & $-0.136083$ & $\phantom{-}0.426954$ \\
+$\phantom{-}0.403637$ & $-0.628539$ & $\phantom{-}0.460605$ \\
+$-0.403637$ & $-0.078567$ & $\phantom{-}0.246502$ \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{3-band 2-regular filter bank.}
+\label{tab:wv32_bank}
+\end{table}
+\FloatBarrier
+
+\begin{table}[H]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{c c c c}
+\multicolumn{4}{c}{\textbf{4-band 2-regular filter bank \cite{LIN2006717}}} \\
+\toprule
+$h_0$ & $h_1$ & $h_2$ & $h_3$ \\
+\midrule
+$\phantom{-}0.2697890$ & $\phantom{-}0.3947890$ & $\phantom{-}0.5197890$ & $\phantom{-}0.6647890$ \\
+$\phantom{-}0.2302110$ & $\phantom{-}0.1052110$ & $-0.0197890$ & $-0.1447890$ \\
+$-0.2825435$ & $\phantom{-}0.5553379$ & $\phantom{-}0.2385187$ & $-0.0783004$ \\
+$-0.5834819$ & $-0.2666627$ & $\phantom{-}0.0501564$ & $\phantom{-}0.3669755$ \\
+$\phantom{-}0.4125840$ & $-0.6279376$ & $\phantom{-}0.3727840$ & $\phantom{-}0.1487574$ \\
+$-0.4125840$ & $-0.1885590$ & $\phantom{-}0.0354659$ & $\phantom{-}0.2594909$ \\
+$\phantom{-}0.2382055$ & $\phantom{-}0.1088646$ & $-0.7275830$ & $\phantom{-}0.5572896$ \\
+$-0.2382055$ & $-0.1088646$ & $\phantom{-}0.0204763$ & $\phantom{-}0.1498171$ \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{4-band 2-regular filter bank.}
+\label{tab:wv42_bank}
+\end{table}
+\FloatBarrier
+
+\begin{table}[H]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{c c c c}
+\multicolumn{4}{c}{\textbf{4-band 4-regular filter bank \cite{LIN2006717}}} \\
+\toprule
+$h_0$ & $h_1$ & $h_2$ & $h_3$ \\
+\midrule
+ 0.0857130200 & -0.1045086525 &  0.2560950163 &  0.1839986022 \\
+ 0.1931394393 &  0.1183282069 & -0.2048089157 & -0.6622893130 \\
+ 0.3491805097 & -0.1011065044 & -0.2503433230 &  0.6880085746 \\
+ 0.5616494215 & -0.0115563891 & -0.2484277272 & -0.1379502447 \\
+ 0.4955029828 &  0.6005913823 &  0.4477496752 &  0.0446493766 \\
+ 0.4145647737 & -0.2550401616 &  0.0010274000 & -0.0823301969 \\
+ 0.2190308939 & -0.4264277361 & -0.0621881917 & -0.0923899104 \\
+-0.1145361261 & -0.0827398180 &  0.5562313118 & -0.0233349758 \\
+-0.0952930728 &  0.07222022649 & -0.2245618041 &  0.0290655661 \\
+-0.1306948909 &  0.2684936992 & -0.3300536827 &  0.0702950474 \\
+-0.0827496793 &  0.1691549718 & -0.2088643503 &  0.0443561794 \\
+ 0.0719795354 & -0.4437039320 &  0.2202951830 & -0.0918374833 \\
+ 0.0140770701 &  0.0849964877 &  0.0207171125 &  0.0128845052 \\
+ 0.0229906779 &  0.1388163056 &  0.0338351983 &  0.0210429802 \\
+ 0.0145382757 &  0.0877812188 &  0.0213958651 &  0.0133066389 \\
+-0.0190928308 & -0.1152813433 & -0.0280987676 & -0.0174753464 \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{4-band 4-regular filter bank.}
+\label{tab:wv44_bank}
+\end{table}
+\FloatBarrier
+
+\bigskip
+\subsection{Level-1 Subband Orientations and Reliability}
+
+Angles are in degrees; larger $\kappa$ indicates a tighter dominant orientation (near $0$ or $180^\circ$ is horizontal; near $90^\circ$ is vertical). The LL band is omitted.
+
+\paragraph{2-band, 2-regular (wv22)}
+\begin{table}[H]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{c|cc}
+\toprule
+\textbf{Subband} & $\boldsymbol{\theta}$ & $\boldsymbol{\kappa}$ \\
+\midrule
+$B_{01}$ & $90.00^\circ$ & 0.691 \\
+$B_{10}$ & $0.00^\circ$  & 0.691 \\
+$B_{11}$ & $0.34^\circ$  & 0.000 \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{Orientation $\theta$ and reliability $\kappa$ for level-1 wv22 subbands (LL excluded).}
+\label{tab:wv22_orient}
+\end{table}
+\FloatBarrier
+
+\paragraph{2-band, 3-regular (wv23, Db3)}
+\begin{table}[H]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{c|cc}
+\toprule
+\textbf{Subband} & $\boldsymbol{\theta}$ & $\boldsymbol{\kappa}$ \\
+\midrule
+$B_{01}$ & $90.00^\circ$  & 0.710 \\
+$B_{10}$ & $180.00^\circ$ & 0.710 \\
+$B_{11}$ & $0.21^\circ$   & 0.000 \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{Orientation $\theta$ and reliability $\kappa$ for level-1 wv23 subbands (LL excluded).}
+\label{tab:wv23_orient}
+\end{table}
+\FloatBarrier
+
+\paragraph{2-band, 4-regular (wv24, Db4)}
+\begin{table}[H]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{c|cc}
+\toprule
+\textbf{Subband} & $\boldsymbol{\theta}$ & $\boldsymbol{\kappa}$ \\
+\midrule
+$B_{01}$ & $90.00^\circ$  & 0.720 \\
+$B_{10}$ & $0.00^\circ$   & 0.720 \\
+$B_{11}$ & $177.88^\circ$ & 0.000 \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{Orientation $\theta$ and reliability $\kappa$ for level-1 wv24 subbands (LL excluded).}
+\label{tab:wv24_orient}
+\end{table}
+\FloatBarrier
+
+\paragraph{3-band, 2-regular (wv32)}
+\begin{table}[H]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{c|cc}
+\toprule
+\textbf{Subband} & $\boldsymbol{\theta}$ & $\boldsymbol{\kappa}$ \\
+\midrule
+$B_{01}$ & $90.00^\circ$  & 0.696 \\
+$B_{02}$ & $90.00^\circ$  & 0.853 \\
+$B_{10}$ & $180.00^\circ$ & 0.696 \\
+$B_{11}$ & $177.77^\circ$ & 0.000 \\
+$B_{12}$ & $90.00^\circ$  & 0.374 \\
+$B_{20}$ & $0.00^\circ$   & 0.853 \\
+$B_{21}$ & $0.00^\circ$   & 0.374 \\
+$B_{22}$ & $179.80^\circ$ & 0.000 \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{Orientation $\theta$ and reliability $\kappa$ for level-1 wv32 subbands (LL excluded).}
+\label{tab:wv32_orient}
+\end{table}
+\FloatBarrier
+
+\paragraph{4-band, 2-regular (wv42)}
+\begin{table}[H]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{c|cc}
+\toprule
+\textbf{Subband} & $\boldsymbol{\theta}$ & $\boldsymbol{\kappa}$ \\
+\midrule
+$B_{01}$ & $90.00^\circ$  & 0.689 \\
+$B_{02}$ & $90.00^\circ$  & 0.841 \\
+$B_{03}$ & $90.00^\circ$  & 0.873 \\
+$B_{10}$ & $180.00^\circ$ & 0.689 \\
+$B_{11}$ & $178.86^\circ$ & 0.000 \\
+$B_{12}$ & $90.00^\circ$  & 0.409 \\
+$B_{13}$ & $90.00^\circ$  & 0.485 \\
+$B_{20}$ & $0.00^\circ$   & 0.841 \\
+$B_{21}$ & $0.00^\circ$   & 0.409 \\
+$B_{22}$ & $90.30^\circ$  & 0.000 \\
+$B_{23}$ & $90.00^\circ$  & 0.108 \\
+$B_{30}$ & $0.00^\circ$   & 0.873 \\
+$B_{31}$ & $0.00^\circ$   & 0.485 \\
+$B_{32}$ & $0.00^\circ$   & 0.108 \\
+$B_{33}$ & $0.54^\circ$   & 0.000 \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{Orientation $\theta$ and reliability $\kappa$ for level-1 wv42 subbands (LL excluded).}
+\label{tab:wv42_orient}
+\end{table}
+\FloatBarrier
+
+\paragraph{4-band, 4-regular (wv44)}
+\begin{table}[H]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{c|cc}
+\toprule
+\textbf{Subband} & $\boldsymbol{\theta}$ & $\boldsymbol{\kappa}$ \\
+\midrule
+$B_{01}$ & $90.00^\circ$  & 0.794 \\
+$B_{02}$ & $90.00^\circ$  & 0.781 \\
+$B_{03}$ & $90.00^\circ$  & 0.907 \\
+$B_{10}$ & $180.00^\circ$ & 0.794 \\
+$B_{11}$ & $89.80^\circ$  & 0.000 \\
+$B_{12}$ & $0.00^\circ$   & 0.014 \\
+$B_{13}$ & $90.00^\circ$  & 0.346 \\
+$B_{20}$ & $180.00^\circ$ & 0.781 \\
+$B_{21}$ & $90.00^\circ$  & 0.014 \\
+$B_{22}$ & $90.77^\circ$  & 0.000 \\
+$B_{23}$ & $90.00^\circ$  & 0.374 \\
+$B_{30}$ & $180.00^\circ$ & 0.907 \\
+$B_{31}$ & $180.00^\circ$ & 0.346 \\
+$B_{32}$ & $0.00^\circ$   & 0.374 \\
+$B_{33}$ & $50.75^\circ$  & 0.000 \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{Orientation $\theta$ and reliability $\kappa$ for level-1 wv44 subbands (LL excluded).}
+\label{tab:wv44_orient}
+\end{table}
+\FloatBarrier
+
+\subsection{Dual-tree Complex Wavelet Filters}
+\label{tab:dtcwt_filters}
+
+We use the standard 2D DTCWT configuration as implemented in common toolboxes: level~1 and levels~$\ge 2$ use Kingsbury Q-shift Hilbert-pair filters. This yields six oriented complex subbands per level with nominal orientations
+$\{15^\circ, 45^\circ, 75^\circ, 105^\circ, 135^\circ, 165^\circ\}$, which we adopt as the band order.
+
+\begin{table}[H]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{l l c}
+\toprule
+\textbf{Level(s)} & \textbf{Family (name)} & \textbf{Tap lengths} \\
+\midrule
+1 & Near-symmetric biorthogonal (\texttt{near\_sym\_a}) & $(5,7)$ \\
+$\ge 2$ & Q-shift Hilbert pair (\texttt{qshift\_a}) & $(10,10)$ \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{DTCWT analysis filters (2D).}
+\end{table}
+\FloatBarrier
